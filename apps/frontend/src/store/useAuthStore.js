@@ -18,8 +18,8 @@ export const useAuthStore = create((set, get) => ({
     try {
       const res = await axiosInstance.get("/auth/check");
 
-      set({ authUser: res.data });
       get().connectSocket();
+      set({ authUser: res.data });
     } catch (error) {
       console.log("Error in checkAuth:", error);
       set({ authUser: null });
@@ -32,9 +32,9 @@ export const useAuthStore = create((set, get) => ({
     set({ isSigningUp: true });
     try {
       const res = await axiosInstance.post("/auth/signup", data);
-      set({ authUser: res.data });
       toast.success("Account created successfully");
       get().connectSocket();
+      set({ authUser: res.data });
     } catch (error) {
       toast.error(error.response.data.message);
     } finally {
@@ -46,10 +46,9 @@ export const useAuthStore = create((set, get) => ({
     set({ isLoggingIn: true });
     try {
       const res = await axiosInstance.post("/auth/login", data);
-      set({ authUser: res.data });
       toast.success("Logged in successfully");
-
       get().connectSocket();
+      set({ authUser: res.data });
     } catch (error) {
       toast.error(error.response.data.message);
     } finally {
@@ -60,10 +59,12 @@ export const useAuthStore = create((set, get) => ({
   logout: async () => {
     try {
       await axiosInstance.post("/auth/logout");
-      set({ authUser: null });
       toast.success("Logged out successfully");
       get().disconnectSocket();
+      set({ authUser: null, onlineUsers: [], socket: null });
     } catch (error) {
+      // also clear the state on error, to be safe
+      set({ authUser: null, onlineUsers: [], socket: null });
       toast.error(error.response.data.message);
     }
   },
@@ -83,23 +84,29 @@ export const useAuthStore = create((set, get) => ({
   },
 
   connectSocket: () => {
-    const { authUser } = get();
-    if (!authUser || get().socket?.connected) return;
+    const { authUser, socket } = get();
+    // If there's no authenticated user yet, or a socket is already connected, do nothing.
+    if (!authUser || socket?.connected) return;
 
-    const socket = io(BASE_URL, {
+    const newSocket = io(BASE_URL, {
       query: {
         userId: authUser._id,
       },
+      // Do not auto-connect; we will handle it manually to attach listeners first.
+      autoConnect: false,
     });
-    socket.connect();
 
-    set({ socket: socket });
-
-    socket.on("getOnlineUsers", (userIds) => {
+    // Set up listeners ONCE. These will be activated on successful connection.
+    newSocket.on("getOnlineUsers", (userIds) => {
       set({ onlineUsers: userIds });
     });
+
+    // Now, manually connect and save the instance to the store.
+    newSocket.connect();
+    set({ socket: newSocket });
   },
   disconnectSocket: () => {
     if (get().socket?.connected) get().socket.disconnect();
+    // No need to set socket to null here, logout action will handle it
   },
 }));
